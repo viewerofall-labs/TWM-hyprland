@@ -165,6 +165,140 @@ function Temps() {
   })
 }
 
+// ─── VRAM ─────────────────────────────────────────────────────────────────────
+function VRam() {
+  const vram = Variable({ used: 0, total: 0 }).poll(3000, () => {
+    try {
+      for (const card of ["card0", "card1", "card2"]) {
+        const base = `/sys/class/drm/${card}/device`
+        const [ok1, u] = GLib.file_get_contents(`${base}/mem_info_vram_used`)
+        const [ok2, t] = GLib.file_get_contents(`${base}/mem_info_vram_total`)
+        if (ok1 && ok2) {
+          const used = parseInt(new TextDecoder().decode(u).trim())
+          const total = parseInt(new TextDecoder().decode(t).trim())
+          if (total > 0) return { used, total }
+        }
+      }
+    } catch {}
+    return { used: 0, total: 0 }
+  })
+
+  return new Widget.Box({
+    className: "pill vram",
+    child: new Widget.Label({
+      className: "stat-label teal",
+      label: vram().as(v => `󰕣 ${(v.used / 1073741824).toFixed(1)}G`),
+      tooltipText: vram().as(v =>
+        `VRAM ${(v.used/1073741824).toFixed(1)}G / ${(v.total/1073741824).toFixed(1)}G`
+      ),
+    }),
+  })
+}
+
+// ─── RAM ──────────────────────────────────────────────────────────────────────
+function Ram() {
+  const ram = Variable({ used: 0, total: 0 }).poll(3000, () => {
+    try {
+      const [, b] = GLib.file_get_contents("/proc/meminfo")
+      const text = new TextDecoder().decode(b)
+      const get = (key: string) => {
+        const m = text.match(new RegExp(`^${key}:\\s+(\\d+)`, "m"))
+        return m ? parseInt(m[1]) * 1024 : 0
+      }
+      return { used: get("MemTotal") - get("MemAvailable"), total: get("MemTotal") }
+    } catch { return { used: 0, total: 0 } }
+  })
+
+  return new Widget.Box({
+    className: "pill ram",
+    child: new Widget.Label({
+      className: "stat-label fg",
+      label: ram().as(r => `󰘚 ${(r.used / 1073741824).toFixed(1)}G`),
+      tooltipText: ram().as(r =>
+        `RAM ${(r.used/1073741824).toFixed(1)}G / ${(r.total/1073741824).toFixed(1)}G`
+      ),
+    }),
+  })
+}
+
+// ─── Net Speed ────────────────────────────────────────────────────────────────
+function NetSpeed() {
+  let prevRx = 0, prevTx = 0, prevTime = 0
+
+  function readNet() {
+    try {
+      const [, b] = GLib.file_get_contents("/proc/net/dev")
+      const text = new TextDecoder().decode(b)
+      let rx = 0, tx = 0
+      for (const line of text.split("\n").slice(2)) {
+        const parts = line.trim().split(/\s+/)
+        if (parts.length < 10) continue
+        if (parts[0].replace(":", "") === "lo") continue
+        rx += parseInt(parts[1]) || 0
+        tx += parseInt(parts[9]) || 0
+      }
+      return { rx, tx }
+    } catch { return { rx: 0, tx: 0 } }
+  }
+
+  function fmt(b: number) {
+    if (b >= 1048576) return `${(b / 1048576).toFixed(1)}M`
+    if (b >= 1024) return `${Math.round(b / 1024)}K`
+    return `${Math.round(b)}B`
+  }
+
+  const speed = Variable({ rx: 0, tx: 0 }).poll(2000, () => {
+    const { rx, tx } = readNet()
+    const now = Date.now()
+    const dt = prevTime > 0 ? (now - prevTime) / 1000 : 0
+    const drx = dt > 0 ? Math.max(0, (rx - prevRx) / dt) : 0
+    const dtx = dt > 0 ? Math.max(0, (tx - prevTx) / dt) : 0
+    prevRx = rx; prevTx = tx; prevTime = now
+    return { rx: drx, tx: dtx }
+  })
+
+  const hasNet = Variable(true).poll(10000, () => {
+    try {
+      const [, b] = GLib.file_get_contents("/proc/net/route")
+      const text = new TextDecoder().decode(b)
+      return text.split("\n").slice(1).some(line => {
+        const parts = line.trim().split(/\s+/)
+        return parts.length > 1 && parts[0] !== "lo" && parts[0] !== ""
+      })
+    } catch { return true }
+  })
+
+  return new Widget.Box({
+    className: "pill net-speed",
+    visible: hasNet(),
+    children: [
+      new Widget.Label({ className: "net-rx", label: speed().as(s => `↓${fmt(s.rx)}`) }),
+      new Widget.Label({ className: "net-sep", label: " " }),
+      new Widget.Label({ className: "net-tx", label: speed().as(s => `↑${fmt(s.tx)}`) }),
+    ],
+  })
+}
+
+// ─── Updates ──────────────────────────────────────────────────────────────────
+function Updates() {
+  const count = Variable(0).poll(
+    1800000,
+    ["sh", "-c", "checkupdates 2>/dev/null | wc -l"],
+    (out: string) => { const n = parseInt(out.trim()); return isNaN(n) ? 0 : n }
+  )
+
+  return new Widget.Button({
+    className: "pill updates",
+    visible: count().as(n => n > 0),
+    onClicked: () => GLib.spawn_command_line_async("kitty --hold -e cachy-update -l"),
+    child: new Widget.Label({
+      className: "updates-label",
+      label: count().as(n => `󰚰 ${n}`),
+      tooltipText: count().as(n => `${n} package update${n !== 1 ? "s" : ""} available`),
+    }),
+  })
+}
+
 // ─── Media ────────────────────────────────────────────────────────────────────
 function Media() {
   const mpris = Mpris.get_default()
@@ -511,7 +645,7 @@ function Bar(gdkmonitor: Gdk.Monitor) {
       startWidget: new Widget.Box({
         className: "bar-left",
         halign: Gtk.Align.START,
-        children: [AppLauncher(), Workspaces(), ClientTitle()],
+        children: [AppLauncher(), Workspaces(), ClientTitle(), Updates()],
       }),
       centerWidget: new Widget.Box({
         className: "bar-center",
@@ -521,7 +655,7 @@ function Bar(gdkmonitor: Gdk.Monitor) {
       endWidget: new Widget.Box({
         className: "bar-right",
         halign: Gtk.Align.END,
-        children: [SysTray(), Media(), Temps(), WallpaperBtn(), NotifBtn(), CCBtn(), PowerBtn()],
+        children: [NetSpeed(), SysTray(), Media(), Ram(), VRam(), Temps(), WallpaperBtn(), NotifBtn(), CCBtn(), PowerBtn()],
       }),
     }),
   })
@@ -537,22 +671,45 @@ const css = `
 
 /* ── Bar window ─────────────────────────────── */
 window.Bar {
-  background-color: ${C.void};
+  background-color: transparent;
   color: ${C.fg};
-  border-bottom: 1px solid ${C.tealBdr};
 }
 
 window.Bar > centerbox {
   padding: 4px 8px;
 }
 
+/* ── CRT scanline animation ─────────────────── */
+@keyframes bracket-flicker {
+  0%   { opacity: 1; }
+  94%  { opacity: 0.15; }
+  96%  { opacity: 0.8; }
+  98%  { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+
 /* ── Pill base ──────────────────────────────── */
 .pill {
   background-color: ${C.deep};
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.22) 0px,
+    rgba(0, 0, 0, 0.22) 1px,
+    rgba(255, 255, 255, 0.015) 1px,
+    rgba(255, 255, 255, 0.015) 2px,
+    transparent 2px,
+    transparent 4px
+  );
   border-radius: 10px;
   border: 1px solid ${C.border};
   padding: 2px 10px;
   margin: 1px 3px;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.pill:hover {
+  box-shadow: 0 0 10px rgba(0, 229, 200, 0.22), 0 0 3px rgba(0, 229, 200, 0.1);
+  border-color: rgba(0, 229, 200, 0.4);
 }
 
 /* ── Workspaces ─────────────────────────────── */
@@ -621,6 +778,7 @@ label.clock-bracket {
   color: ${C.teal};
   font-size: 13px;
   font-weight: bold;
+  animation: bracket-flicker 8s infinite;
 }
 
 label.clock-time {
@@ -782,6 +940,54 @@ button.power-btn:hover {
 button.power-btn label {
   color: ${C.red};
   font-size: 18px;
+}
+
+/* ── VRAM / RAM ─────────────────────────────── */
+box.vram, box.ram {
+  border-color: rgba(0, 229, 200, 0.2);
+}
+
+label.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+label.stat-label.teal { color: ${C.teal}; }
+label.stat-label.fg   { color: ${C.fg}; }
+
+/* ── Net Speed ──────────────────────────────── */
+box.net-speed {
+  border-color: rgba(199, 146, 234, 0.18);
+}
+
+label.net-rx {
+  color: ${C.teal};
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+label.net-tx {
+  color: ${C.dim};
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+label.net-sep { color: transparent; }
+
+/* ── Updates ────────────────────────────────── */
+box.updates {
+  border-color: rgba(255, 255, 51, 0.35);
+  background-color: rgba(18, 0, 32, 0.9);
+}
+
+label.updates-label {
+  color: ${C.yellow};
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 /* ── Control Center window ──────────────────── */
