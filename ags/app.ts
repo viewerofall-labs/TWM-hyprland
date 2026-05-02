@@ -1,8 +1,6 @@
-#!/usr/bin/env -S ags run
+#!/usr/bin/env -S ags run --gtk 3
 
-// Astal Config - Oneshot World Machine
-// FINAL WORKING VERSION
-import Gtk from 'gi://Gtk?version=3.0'
+import "gi://Gtk?version=3.0"
 import { App, Astal, Gtk, Gdk } from "astal/gtk3"
 import * as Widget from "astal/gtk3/widget"
 import Variable from "astal/variable"
@@ -15,1239 +13,982 @@ import Network from "gi://AstalNetwork"
 import Tray from "gi://AstalTray"
 import Mpris from "gi://AstalMpris"
 
-// Colors
-const colors = {
-  bg: "#000000",
-  bgAlt: "#0a0a0a",
-  fg: "#9564FD",
-  fgAlt: "#7B4FD9",
-  accent: "#FFFF33",
-  border: "#9564FD"
+// ─── The World Machine palette ────────────────────────────────────────────────
+const C = {
+  void:    "#08000e",   // deepest bg
+  deep:    "#120020",   // module bg
+  mid:     "#1e0038",   // slightly lighter
+  fg:      "#c792ea",   // pale violet
+  dim:     "#7B5AAA",   // muted violet
+  teal:    "#00e5c8",   // machine accent
+  yellow:  "#FFFF33",   // clock highlight
+  red:     "#ff4f7b",   // power/danger
+  border:  "rgba(199, 146, 234, 0.22)",
+  tealBdr: "rgba(0, 229, 200, 0.25)",
 }
 
-// Global control center visibility
 const controlCenterVisible = Variable(false)
 
-// Workspaces Widget
+// ─── Workspaces ───────────────────────────────────────────────────────────────
 function Workspaces() {
   const hypr = Hyprland.get_default()
-
   return new Widget.Box({
     className: "workspaces",
     children: bind(hypr, "workspaces").as(wss =>
-    wss
-    .filter(ws => ws.id > 0)
-    .sort((a, b) => a.id - b.id)
-    .map(ws => new Widget.Button({
-      className: bind(hypr, "focusedWorkspace").as(fw =>
-      ws === fw ? "workspace focused" : "workspace"
-      ),
-      onClicked: () => ws.focus(),
-                                 child: new Widget.Label({ label: `${ws.id}` })
-    }))
-    )
+      wss
+        .filter(ws => ws.id > 0)
+        .sort((a, b) => a.id - b.id)
+        .map(ws => new Widget.Button({
+          className: bind(hypr, "focusedWorkspace").as(fw =>
+            ws === fw ? "ws ws-focused" : "ws"
+          ),
+          onClicked: () => ws.focus(),
+          child: new Widget.Label({ label: `${ws.id}` }),
+        }))
+    ),
   })
 }
 
-// Client Title Widget
+// ─── Client Title ─────────────────────────────────────────────────────────────
 function ClientTitle() {
   const hypr = Hyprland.get_default()
   const focused = bind(hypr, "focusedClient")
-
   return new Widget.Box({
-    className: "client-title",
+    className: "pill client-title",
     visible: focused.as(Boolean),
-                        child: new Widget.Label({
-                          label: focused.as(client =>
-                          client ? client.title.substring(0, 50) : ""
-                          )
-                        })
+    child: new Widget.Label({
+      label: focused.as(c => c?.title != null ? c.title.substring(0, 40) : ""),
+    }),
   })
 }
 
-// Clock Widget
+// ─── Clock ────────────────────────────────────────────────────────────────────
 function Clock() {
   const time = Variable("").poll(1000, () =>
-  GLib.DateTime.new_now_local().format("%I:%M %p")!
+    GLib.DateTime.new_now_local().format("%H:%M:%S")!
   )
-
-  const date = Variable("").poll(1000, () =>
-  GLib.DateTime.new_now_local().format("%a %b %d")!
+  const date = Variable("").poll(60000, () =>
+    GLib.DateTime.new_now_local().format("%a %d %b")!
   )
-
   return new Widget.Box({
-    className: "clock",
+    className: "pill clock",
     children: [
-      new Widget.Label({
-        className: "time",
-        label: time()
-      }),
-      new Widget.Label({
-        className: "date",
-        label: date()
-      }),
-    ]
+      new Widget.Label({ className: "clock-bracket", label: "[" }),
+      new Widget.Label({ className: "clock-time",    label: time() }),
+      new Widget.Label({ className: "clock-sep",     label: "  " }),
+      new Widget.Label({ className: "clock-date",    label: date() }),
+      new Widget.Label({ className: "clock-bracket", label: "]" }),
+    ],
   })
 }
 
-// Media Player Widget with Dropdown Controls
-function Media() {
-  const mpris = Mpris.get_default()
-  const expanded = Variable(false)
-
-  return new Widget.Box({
-    className: "media",
-    vertical: true,
-    children: bind(mpris, "players").as(players => {
-      const player = players[0]
-
-      if (!player) {
-        return []
-      }
-
-      const { title, artist, artUrl } = player
-      const displayText = artist ? `${title} - ${artist}` : title
-
-      // Main button
-      const mainButton = new Widget.Button({
-        className: "media-button",
-        onClicked: () => expanded.set(!expanded.get()),
-                                           child: new Widget.Box({
-                                             children: [
-                                               new Widget.Icon({
-                                                 icon: bind(player, "playbackStatus").as(status =>
-                                                 status === Mpris.PlaybackStatus.PLAYING
-                                                 ? "media-playback-pause-symbolic"
-                                                 : "media-playback-start-symbolic"
-                                                 )
-                                               }),
-                                               new Widget.Label({
-                                                 label: displayText.substring(0, 40),
-                                                                tooltipText: displayText
-                                               })
-                                             ]
-                                           })
-      })
-
-      // Expanded controls
-      const controls = new Widget.Box({
-        className: "media-controls",
-        visible: expanded(),
-                                      children: [
-                                        new Widget.Button({
-                                          className: "media-control-btn",
-                                          tooltipText: "Previous",
-                                          onClicked: () => player.previous(),
-                                                          child: new Widget.Icon({ icon: "media-skip-backward-symbolic" })
-                                        }),
-                                        new Widget.Button({
-                                          className: "media-control-btn",
-                                          tooltipText: "Play/Pause",
-                                          onClicked: () => player.playPause(),
-                                                          child: new Widget.Icon({
-                                                            icon: bind(player, "playbackStatus").as(status =>
-                                                            status === Mpris.PlaybackStatus.PLAYING
-                                                            ? "media-playback-pause-symbolic"
-                                                            : "media-playback-start-symbolic"
-                                                            )
-                                                          })
-                                        }),
-                                        new Widget.Button({
-                                          className: "media-control-btn",
-                                          tooltipText: "Next",
-                                          onClicked: () => player.next(),
-                                                          child: new Widget.Icon({ icon: "media-skip-forward-symbolic" })
-                                        }),
-                                        new Widget.Button({
-                                          className: "media-control-btn",
-                                          tooltipText: "Shuffle",
-                                          onClicked: () => player.shuffle = !player.shuffle,
-                                                          child: new Widget.Icon({ icon: "media-playlist-shuffle-symbolic" })
-                                        }),
-                                      ]
-      })
-
-      return [mainButton, controls]
-    })
-  })
-}
-
-// Weather Widget
+// ─── Weather ──────────────────────────────────────────────────────────────────
 function Weather() {
-  const weatherData = Variable({ temp: "--", icon: "🌡", condition: "Loading..." })
+  const data = Variable<{ temp: string; icon: string }>({ temp: "--", icon: "~" })
 
-  const updateWeather = () => {
+  function condIcon(c: string) {
+    if (c.includes("Clear") || c.includes("Sunny"))  return "󰖙"
+    if (c.includes("Partly"))                         return "󰖕"
+    if (c.includes("Cloudy") || c.includes("Over"))  return "󰖐"
+    if (c.includes("Rain")   || c.includes("Driz"))  return "󰖗"
+    if (c.includes("Snow"))                           return "󰖘"
+    if (c.includes("Thunder") || c.includes("storm"))return "󰖓"
+    return "󰖙"
+  }
+
+  function fetch() {
     try {
-      const configFile = `${GLib.get_home_dir()}/.config/weather-config`
-      const [, contents] = GLib.file_get_contents(configFile)
-      const city = new TextDecoder().decode(contents).trim() || "Phoenix"
-
-      GLib.spawn_command_line_async(`bash -c "curl -s 'wttr.in/${city}?format=j1' -o ${GLib.get_home_dir()}/.cache/weather-cache.json"`)
-
-      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
+      const cfg = `${GLib.get_home_dir()}/.config/weather-config`
+      const [ok, raw] = GLib.file_get_contents(cfg)
+      const city  = ok ? new TextDecoder().decode(raw).trim() : "Phoenix"
+      const cache = `${GLib.get_home_dir()}/.cache/ags-weather.json`
+      GLib.spawn_command_line_async(`bash -c "curl -sf 'wttr.in/${city}?format=j1' -o ${cache}"`)
+      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
         try {
-          const cacheFile = `${GLib.get_home_dir()}/.cache/weather-cache.json`
-          const [, cacheContents] = GLib.file_get_contents(cacheFile)
-          const data = JSON.parse(new TextDecoder().decode(cacheContents))
-
-          const temp = data.current_condition[0].temp_F
-          const condition = data.current_condition[0].weatherDesc[0].value
-
-          let icon = "🌡"
-          if (condition.includes("Clear") || condition.includes("Sunny")) icon = "☀"
-            else if (condition.includes("Partly cloudy")) icon = "⛅"
-              else if (condition.includes("Cloudy")) icon = "☁"
-                else if (condition.includes("Rain")) icon = "🌧"
-
-                  weatherData.set({ temp, icon, condition })
-        } catch (e) {
-          print("Weather cache read error:", e)
-        }
+          const [, buf] = GLib.file_get_contents(cache)
+          const p = JSON.parse(new TextDecoder().decode(buf))
+          const temp = p.current_condition[0].temp_F
+          const cond = p.current_condition[0].weatherDesc[0].value
+          data.set({ temp, icon: condIcon(cond) })
+        } catch {}
         return false
       })
-    } catch (e) {
-      print("Weather fetch error:", e)
-    }
+    } catch {}
   }
 
-  updateWeather()
-  Variable("").poll(1800000, updateWeather)
+  fetch()
+  Variable("").poll(1800000, fetch)
 
-  return new Widget.Button({
-    className: "weather",
-    onClicked: () => {
-      GLib.spawn_command_line_async(`${GLib.get_home_dir()}/.config/hypr/scripts/weather-widget.sh`)
-    },
-    child: new Widget.Box({
-      children: [
+  return new Widget.Box({
+    className: "pill weather",
+    child: new Widget.Label({
+      className: "weather-label",
+      label: data().as(d => `${d.icon}  ${d.temp}°F`),
+    }),
+  })
+}
+
+// ─── Temperatures ─────────────────────────────────────────────────────────────
+function Temps() {
+  const cpuTemp = Variable(0).poll(3000, () => {
+    try {
+      const [, b] = GLib.file_get_contents("/sys/class/thermal/thermal_zone0/temp")
+      return Math.round(parseInt(new TextDecoder().decode(b).trim()) / 1000)
+    } catch { return 0 }
+  })
+
+  // AMD 6700 XT junction (hotspot) — hwmon2/temp2
+  const gpuTemp = Variable(0).poll(3000, () => {
+    try {
+      const [, b] = GLib.file_get_contents("/sys/class/hwmon/hwmon2/temp2_input")
+      return Math.round(parseInt(new TextDecoder().decode(b).trim()) / 1000)
+    } catch { return 0 }
+  })
+
+  return new Widget.Box({
+    className: "pill temps",
+    children: [
+      new Widget.Label({ className: "temp-icon", label: "󰻠" }),
+      new Widget.Label({
+        className: "temp-val",
+        label: cpuTemp().as(t => `${t}°`),
+        tooltipText: cpuTemp().as(t => `CPU: ${t}°C`),
+      }),
+      new Widget.Label({ className: "temp-div", label: "  " }),
+      new Widget.Label({ className: "temp-icon gpu", label: "󰍛" }),
+      new Widget.Label({
+        className: "temp-val gpu",
+        label: gpuTemp().as(t => `${t}°`),
+        tooltipText: gpuTemp().as(t => `GPU junction: ${t}°C`),
+      }),
+    ],
+  })
+}
+
+// ─── Media ────────────────────────────────────────────────────────────────────
+function Media() {
+  const mpris = Mpris.get_default()
+  return new Widget.Box({
+    className: "pill media",
+    visible: bind(mpris, "players").as(p => p.length > 0),
+    children: bind(mpris, "players").as(players => {
+      const player = players[0]
+      if (!player) return []
+      return [
+        new Widget.Button({
+          className: "media-btn",
+          onClicked: () => player.previous(),
+          child: new Widget.Label({ label: "󰒮" }),
+        }),
+        new Widget.Button({
+          className: "media-btn media-play",
+          onClicked: () => player.playPause(),
+          child: new Widget.Label({
+            label: bind(player, "playbackStatus").as(s =>
+              s === Mpris.PlaybackStatus.PLAYING ? "󰏤" : "󰐊"
+            ),
+          }),
+        }),
+        new Widget.Button({
+          className: "media-btn",
+          onClicked: () => player.next(),
+          child: new Widget.Label({ label: "󰒭" }),
+        }),
         new Widget.Label({
-          label: weatherData().as(data => `${data.icon} ${data.temp}°F`)
-        })
+          className: "media-title",
+          label: bind(player, "title").as(t => t ? t.substring(0, 26) : ""),
+        }),
       ]
-    })
+    }),
   })
 }
 
-// Volume Widget
-function Volume() {
-  const speaker = Wp.get_default()?.audio.defaultSpeaker!
-
-  return new Widget.Box({
-    className: "volume",
-    children: [
-      new Widget.Icon({
-        icon: bind(speaker, "volumeIcon")
-      }),
-      new Widget.Label({
-        label: bind(speaker, "volume").as(v => `${Math.round(v * 100)}%`)
-      })
-    ]
-  })
-}
-
-// Network Widget
-function NetworkIndicator() {
-  const { wifi, wired } = Network.get_default()
-
-  return new Widget.Box({
-    className: "network",
-    children: [
-      new Widget.Icon({
-        icon: bind(wifi, "iconName"),
-                      visible: bind(wifi, "enabled")
-      }),
-      new Widget.Icon({
-        icon: bind(wired, "iconName"),
-                      visible: bind(wired, "speed").as(s => s > 0)
-      })
-    ]
-  })
-}
-
-// Battery Widget
-function BatteryIndicator() {
-  const bat = Battery.get_default()
-
-  if (!bat.isPresent) {
-    return new Widget.Box({})
-  }
-
-  return new Widget.Box({
-    className: "battery",
-    children: [
-      new Widget.Icon({
-        icon: bind(bat, "batteryIconName")
-      }),
-      new Widget.Label({
-        label: bind(bat, "percentage").as(p => `${Math.round(p * 100)}%`)
-      })
-    ]
-  })
-}
-
-// System Tray Widget
+// ─── SysTray ──────────────────────────────────────────────────────────────────
 function SysTray() {
   const tray = Tray.get_default()
-
   return new Widget.Box({
-    className: "system-tray",
-    children: bind(tray, "items").as(items => items.map(item => {
-      if (item.iconThemePath)
-        Gtk.IconTheme.get_default()?.append_search_path(item.iconThemePath)
-
+    className: "pill systray",
+    visible: bind(tray, "items").as(i => i.length > 0),
+    children: bind(tray, "items").as(items =>
+      items.map(item => {
+        if (item.iconThemePath)
+          Gtk.IconTheme.get_default()?.append_search_path(item.iconThemePath)
         return new Widget.Button({
-          className: "tray-item",
+          className: "tray-btn",
           tooltipMarkup: bind(item, "tooltipMarkup"),
-                                 onClickRelease: (self, event) => {
-                                   if (event.button === Gdk.BUTTON_PRIMARY) {
-                                     item.activate(event.x, event.y)
-                                   } else if (event.button === Gdk.BUTTON_SECONDARY) {
-                                     item.activate(event.x, event.y)
-                                   }
-                                 },
-                                 child: new Widget.Icon({
-                                   gIcon: bind(item, "gicon")
-                                 })
+          onClickRelease: (_, ev) => item.activate(ev.x, ev.y),
+          child: new Widget.Icon({ gicon: bind(item, "gicon") }),
         })
-    }))
+      })
+    ),
   })
 }
 
-// Niko Avatar Widget
-function NikoAvatar() {
-  const mood = Variable("😌").poll(60000, () => {
-    const hour = GLib.DateTime.new_now_local().get_hour()
-
-    if (hour >= 6 && hour < 12) return "😌"
-      if (hour >= 12 && hour < 14) return "😊"
-        if (hour >= 14 && hour < 18) return "😌"
-          if (hour >= 18 && hour < 22) return "😊"
-            return "😴"
-  })
-
-  return new Widget.Box({
-    className: "niko-avatar",
-    child: new Widget.Label({ label: mood() })
-  })
-}
-
-// Notification Center Button
-function NotificationButton() {
-  return new Widget.Button({
-    className: "notification-button",
-    tooltipText: "Notifications",
-    onClicked: () => {
-      GLib.spawn_command_line_async("swaync-client -t")
-    },
-    child: new Widget.Icon({
-      icon: "preferences-system-notifications-symbolic"
-    })
-  })
-}
-
-// App Launcher Button
+// ─── App Launcher ─────────────────────────────────────────────────────────────
 function AppLauncher() {
   return new Widget.Button({
-    className: "app-launcher",
+    className: "pill launcher-btn",
     tooltipText: "Applications",
-    onClicked: () => {
-      GLib.spawn_command_line_async(`${GLib.get_home_dir()}/.config/rofi/bin/launcher/launcher.sh`)
-    },
-    child: new Widget.Icon({
-      icon: "view-app-grid-symbolic"
-    })
+    onClicked: () => GLib.spawn_command_line_async(
+      `${GLib.get_home_dir()}/.config/rofi/bin/launcher/launcher.sh`
+    ),
+    child: new Widget.Label({ label: "󰐱" }),  // 9-dot grid
   })
 }
 
-// Wallpaper Switcher Button (keeping existing one)
-
-// CPU Usage Widget
-function CPU() {
-  const usage = Variable(0).poll(2000, () => {
-    try {
-      const [, out] = GLib.spawn_command_line_sync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
-      const str = new TextDecoder().decode(out).trim()
-      return parseFloat(str) || 0
-    } catch {
-      return 0
-    }
-  })
-
-  return new Widget.Box({
-    className: "cpu",
-    tooltipText: usage().as(u => `CPU: ${Math.round(u)}%`),
-                        children: [
-                          new Widget.Icon({ icon: "cpu-symbolic" }),
-                        new Widget.Label({ label: usage().as(u => `${Math.round(u)}%`) })
-                        ]
-  })
-}
-
-// RAM Usage Widget
-function RAM() {
-  const usage = Variable(0).poll(2000, () => {
-    try {
-      const [, out] = GLib.spawn_command_line_sync("free | grep Mem | awk '{print ($3/$2) * 100.0}'")
-      const str = new TextDecoder().decode(out).trim()
-      return parseFloat(str) || 0
-    } catch {
-      return 0
-    }
-  })
-
-  return new Widget.Box({
-    className: "ram",
-    tooltipText: usage().as(u => `RAM: ${Math.round(u)}%`),
-                        children: [
-                          new Widget.Icon({ icon: "drive-harddisk-symbolic" }),
-                        new Widget.Label({ label: usage().as(u => `${Math.round(u)}%`) })
-                        ]
-  })
-}
-
-// Temperature Widget
-function Temperature() {
-  const temp = Variable(0).poll(5000, () => {
-    try {
-      const [, out] = GLib.spawn_command_line_sync("cat /sys/class/thermal/thermal_zone0/temp")
-      const str = new TextDecoder().decode(out).trim()
-      return Math.round(parseInt(str) / 1000) || 0
-    } catch {
-      return 0
-    }
-  })
-
-  return new Widget.Box({
-    className: "temperature",
-    tooltipText: temp().as(t => `CPU Temp: ${t}°C`),
-                        children: [
-                          new Widget.Icon({ icon: "weather-clear-symbolic" }),
-                        new Widget.Label({ label: temp().as(t => `${t}°C`) })
-                        ]
-  })
-}
-
-// GPU Usage Widget (NVIDIA)
-function GPU() {
-  const usage = Variable(0).poll(2000, () => {
-    try {
-      const [, out] = GLib.spawn_command_line_sync("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits")
-      const str = new TextDecoder().decode(out).trim()
-      return parseInt(str) || 0
-    } catch {
-      return 0
-    }
-  })
-
-  return new Widget.Box({
-    className: "gpu",
-    visible: usage().as(u => u > 0), // Hide if no GPU detected
-                        tooltipText: usage().as(u => `GPU: ${u}%`),
-                        children: [
-                          new Widget.Icon({ icon: "video-display-symbolic" }),
-                        new Widget.Label({ label: usage().as(u => `${u}%`) })
-                        ]
-  })
-}
-
-// Power Menu Button
-function PowerMenu() {
+// ─── Wallpaper ────────────────────────────────────────────────────────────────
+function WallpaperBtn() {
   return new Widget.Button({
-    className: "power-menu",
-    tooltipText: "Power Menu",
-    onClicked: () => {
-      GLib.spawn_command_line_async(`${GLib.get_home_dir()}/.config/rofi/bin/powermenu/powermenu.sh`)
-    },
-    child: new Widget.Icon({
-      icon: "system-shutdown-symbolic"
-    })
+    className: "pill icon-btn wallpaper-btn",
+    tooltipText: "Wallpaper",
+    onClicked: () => GLib.spawn_command_line_async(
+      `${GLib.get_home_dir()}/.config/hypr/scripts/wallpaper.sh`
+    ),
+    child: new Widget.Label({ label: "󰸉" }),
   })
 }
 
-// Idle Inhibitor Toggle
-function IdleInhibitor() {
-  const inhibited = Variable(false)
-
+// ─── Notification Button ──────────────────────────────────────────────────────
+function NotifBtn() {
   return new Widget.Button({
-    className: "idle-inhibitor",
-    tooltipText: inhibited().as(i => i ? "Sleep: Disabled" : "Sleep: Enabled"),
-                           onClicked: () => {
-                             if (inhibited.get()) {
-                               GLib.spawn_command_line_async("pkill -f 'systemd-inhibit --what=idle'")
-                               inhibited.set(false)
-                             } else {
-                               GLib.spawn_command_line_async("systemd-inhibit --what=idle --who=AGS --why='User requested' sleep infinity")
-                               inhibited.set(true)
-                             }
-                           },
-                           child: new Widget.Icon({
-                             icon: inhibited().as(i => i ? "weather-clear-symbolic" : "weather-clear-night-symbolic")
-                           })
+    className: "pill icon-btn",
+    tooltipText: "Notifications",
+    onClicked: () => GLib.spawn_command_line_async("swaync-client -t"),
+    child: new Widget.Icon({ icon: "preferences-system-notifications-symbolic" }),
   })
 }
 
-// Control Center Popup Window
-function ControlCenterPopup() {
-  const wifi = Network.get_default().wifi
+// ─── Control Center Button ────────────────────────────────────────────────────
+function CCBtn() {
+  return new Widget.Button({
+    className: "pill icon-btn cc-btn",
+    tooltipText: "Quick Settings",
+    onClicked: () => controlCenterVisible.set(!controlCenterVisible.get()),
+    child: new Widget.Icon({ icon: "preferences-system-symbolic" }),
+  })
+}
+
+// ─── Power ────────────────────────────────────────────────────────────────────
+function PowerBtn() {
+  return new Widget.Button({
+    className: "pill power-btn",
+    tooltipText: "Power",
+    onClicked: () => GLib.spawn_command_line_async(
+      `${GLib.get_home_dir()}/.config/rofi/bin/powermenu/powermenu.sh`
+    ),
+    child: new Widget.Label({ label: "⏻" }),
+  })
+}
+
+// ─── Control Center ───────────────────────────────────────────────────────────
+function ControlCenter() {
+  const wifi    = Network.get_default().wifi
   const speaker = Wp.get_default()?.audio.defaultSpeaker!
+  const wifiExpanded = Variable(false)
+  const inhibited    = Variable(false)
+
+  const brightness = Variable(50).poll(2000, () => {
+    try {
+      const [, cur] = GLib.spawn_command_line_sync("brightnessctl get")
+      const [, max] = GLib.spawn_command_line_sync("brightnessctl max")
+      const c = parseInt(new TextDecoder().decode(cur).trim())
+      const m = parseInt(new TextDecoder().decode(max).trim())
+      return m > 0 ? Math.round((c / m) * 100) : 50
+    } catch { return 50 }
+  })
 
   return new Widget.Window({
     name: "control-center",
-    className: "control-center-window",
+    className: "cc-window",
     visible: controlCenterVisible(),
-                           anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.RIGHT,
-                           exclusivity: Astal.Exclusivity.NORMAL,
-                           keymode: Astal.Keymode.ON_DEMAND,
-                           child: new Widget.Box({
-                             className: "control-center-content",
-                             vertical: true,
-                             children: [
-                               // Header
-                               new Widget.Box({
-                                 className: "control-center-header",
-                                 children: [
-                                   new Widget.Label({
-                                     label: "Quick Settings",
-                                     className: "control-center-title"
-                                   })
-                                 ]
-                               }),
-
-                               // WiFi Section
-                               new Widget.Box({
-                                 className: "control-section",
-                                 vertical: true,
-                                 children: [
-                                   new Widget.Button({
-                                     className: "control-button",
-                                     onClicked: () => {
-                                       wifi.enabled = !wifi.enabled
-                                     },
-                                     child: new Widget.Box({
-                                       children: [
-                                         new Widget.Icon({
-                                           icon: bind(wifi, "iconName")
-                                         }),
-                                         new Widget.Box({
-                                           vertical: true,
-                                           children: [
-                                             new Widget.Label({
-                                               label: "WiFi",
-                                               className: "control-label",
-                                               halign: Gtk.Align.START
-                                             }),
-                                             new Widget.Label({
-                                               label: bind(wifi, "ssid").as(ssid => ssid || "Disconnected"),
-                                                              className: "control-sublabel",
-                                                              halign: Gtk.Align.START
-                                             })
-                                           ]
-                                         })
-                                       ]
-                                     })
-                                   })
-                                 ]
-                               }),
-
-                               // Bluetooth Section
-                               new Widget.Box({
-                                 className: "control-section",
-                                 children: [
-                                   new Widget.Button({
-                                     className: "control-button",
-                                     onClicked: () => {
-                                       GLib.spawn_command_line_async("bluetoothctl power toggle")
-                                     },
-                                     child: new Widget.Box({
-                                       children: [
-                                         new Widget.Icon({
-                                           icon: "bluetooth-symbolic"
-                                         }),
-                                         new Widget.Label({
-                                           label: "Bluetooth",
-                                           className: "control-label"
-                                         })
-                                       ]
-                                     })
-                                   })
-                                 ]
-                               }),
-
-                               // Volume Slider
-                               new Widget.Box({
-                                 className: "control-section",
-                                 vertical: true,
-                                 children: [
-                                   new Widget.Label({
-                                     label: "Volume",
-                                     className: "slider-label",
-                                     halign: Gtk.Align.START
-                                   }),
-                                   new Widget.Box({
-                                     children: [
-                                       new Widget.Icon({
-                                         icon: bind(speaker, "volumeIcon")
-                                       }),
-                                       new Widget.Slider({
-                                         className: "volume-slider",
-                                         hexpand: true,
-                                         value: bind(speaker, "volume"),
-                                                         onDragged: ({ value }) => speaker.volume = value,
-                                                         min: 0,
-                                                         max: 1
-                                       }),
-                                       new Widget.Label({
-                                         label: bind(speaker, "volume").as(v => `${Math.round(v * 100)}%`)
-                                       })
-                                     ]
-                                   })
-                                 ]
-                               }),
-
-                               // Brightness Slider
-                               new Widget.Box({
-                                 className: "control-section",
-                                 vertical: true,
-                                 children: [
-                                   new Widget.Label({
-                                     label: "Brightness",
-                                     className: "slider-label",
-                                     halign: Gtk.Align.START
-                                   }),
-                                   new Widget.Box({
-                                     children: [
-                                       new Widget.Icon({
-                                         icon: "display-brightness-symbolic"
-                                       }),
-                                       new Widget.Slider({
-                                         className: "brightness-slider",
-                                         hexpand: true,
-                                         value: 50,
-                                         onDragged: ({ value }) => {
-                                           GLib.spawn_command_line_async(`brightnessctl set ${Math.round(value)}%`)
-                                         },
-                                         min: 0,
-                                         max: 100
-                                       }),
-                                       new Widget.Label({
-                                         label: "50%"
-                                       })
-                                     ]
-                                   })
-                                 ]
-                               })
-                             ]
-                           })
-  })
-}
-
-// Control Center Toggle Button (opens popup with WiFi, Bluetooth, etc.)
-// Control Center Toggle Button
-function ControlCenter() {
-  return new Widget.Button({
-    className: "control-center-btn",
-    tooltipText: "Control Center",
-    onClicked: () => {
-      controlCenterVisible.set(!controlCenterVisible.get())
-    },
+    anchor: Astal.WindowAnchor.TOP | Astal.WindowAnchor.RIGHT,
+    exclusivity: Astal.Exclusivity.NORMAL,
+    keymode: Astal.Keymode.ON_DEMAND,
     child: new Widget.Box({
+      className: "cc-box",
+      vertical: true,
+      halign: Gtk.Align.CENTER,
       children: [
-        new Widget.Icon({ icon: "preferences-system-symbolic" })
-      ]
-    })
+
+        // header
+        new Widget.Box({
+          className: "cc-header",
+          children: [
+            new Widget.Label({ className: "cc-title", label: "󰒓  SYSTEM CONTROL" }),
+          ],
+        }),
+
+        // wifi
+        new Widget.Box({
+          className: "cc-section",
+          vertical: true,
+          children: [
+            new Widget.Box({
+              className: "cc-row",
+              children: [
+                new Widget.Button({
+                  className: "cc-toggle",
+                  hexpand: true,
+                  onClicked: () => { wifi.enabled = !wifi.enabled },
+                  child: new Widget.Box({
+                    children: [
+                      new Widget.Icon({ icon: bind(wifi, "iconName"), className: "cc-icon" }),
+                      new Widget.Box({
+                        vertical: true,
+                        children: [
+                          new Widget.Label({ className: "cc-label",    label: "NETWORK",  halign: Gtk.Align.START }),
+                          new Widget.Label({ className: "cc-sublabel", halign: Gtk.Align.START,
+                            label: bind(wifi, "ssid").as(s => s || "OFFLINE"),
+                          }),
+                        ],
+                      }),
+                    ],
+                  }),
+                }),
+                new Widget.Button({
+                  className: "cc-expand",
+                  onClicked: () => wifiExpanded.set(!wifiExpanded.get()),
+                  child: new Widget.Label({
+                    label: wifiExpanded().as(e => e ? "▲" : "▼"),
+                  }),
+                }),
+              ],
+            }),
+            new Widget.Box({
+              className: "ap-list",
+              vertical: true,
+              visible: wifiExpanded(),
+              children: bind(wifi, "accessPoints").as(aps =>
+                [...aps]
+                  .sort((a, b) => b.strength - a.strength)
+                  .slice(0, 7)
+                  .map(ap => new Widget.Button({
+                    className: bind(wifi, "ssid").as(s =>
+                      s === ap.ssid ? "ap-row ap-active" : "ap-row"
+                    ),
+                    onClicked: () =>
+                      GLib.spawn_command_line_async(`nmcli device wifi connect "${ap.ssid}"`),
+                    child: new Widget.Box({
+                      children: [
+                        new Widget.Label({
+                          className: "ap-sig",
+                          label: ap.strength > 66 ? "▌▌▌" : ap.strength > 33 ? "▌▌░" : "▌░░",
+                        }),
+                        new Widget.Label({
+                          className: "ap-ssid", hexpand: true, halign: Gtk.Align.START,
+                          label: ap.ssid || "(hidden)",
+                        }),
+                        new Widget.Label({
+                          className: "ap-pct",
+                          label: `${ap.strength}%`,
+                        }),
+                      ],
+                    }),
+                  }))
+              ),
+            }),
+          ],
+        }),
+
+        // bluetooth
+        new Widget.Box({
+          className: "cc-section",
+          children: [
+            new Widget.Button({
+              className: "cc-toggle",
+              hexpand: true,
+              onClicked: () => GLib.spawn_command_line_async("bluetoothctl power toggle"),
+              child: new Widget.Box({
+                children: [
+                  new Widget.Icon({ icon: "bluetooth-symbolic", className: "cc-icon" }),
+                  new Widget.Label({ className: "cc-label", label: "BLUETOOTH" }),
+                ],
+              }),
+            }),
+          ],
+        }),
+
+        // volume
+        new Widget.Box({
+          className: "cc-section",
+          vertical: true,
+          children: [
+            new Widget.Label({ className: "cc-slider-label", label: "VOLUME", halign: Gtk.Align.START }),
+            new Widget.Box({
+              children: [
+                new Widget.Icon({ icon: bind(speaker, "volumeIcon"), className: "cc-icon" }),
+                new Widget.Slider({
+                  className: "cc-slider",
+                  hexpand: true,
+                  value: bind(speaker, "volume"),
+                  min: 0, max: 1,
+                  onDragged: ({ value }) => { speaker.volume = value },
+                }),
+                new Widget.Label({
+                  className: "cc-pct",
+                  label: bind(speaker, "volume").as(v => `${Math.round(v * 100)}%`),
+                }),
+              ],
+            }),
+          ],
+        }),
+
+        // brightness
+        new Widget.Box({
+          className: "cc-section",
+          vertical: true,
+          children: [
+            new Widget.Label({ className: "cc-slider-label", label: "BRIGHTNESS", halign: Gtk.Align.START }),
+            new Widget.Box({
+              children: [
+                new Widget.Icon({ icon: "display-brightness-symbolic", className: "cc-icon" }),
+                new Widget.Slider({
+                  className: "cc-slider",
+                  hexpand: true,
+                  value: brightness().as(b => b / 100),
+                  min: 0, max: 1,
+                  onDragged: ({ value }) => {
+                    const pct = Math.round(value * 100)
+                    brightness.set(pct)
+                    GLib.spawn_command_line_async(`brightnessctl set ${pct}%`)
+                  },
+                }),
+                new Widget.Label({
+                  className: "cc-pct",
+                  label: brightness().as(b => `${b}%`),
+                }),
+              ],
+            }),
+          ],
+        }),
+
+        // actions
+        new Widget.Box({
+          className: "cc-actions",
+          halign: Gtk.Align.CENTER,
+          children: [
+            new Widget.Button({
+              className: "cc-action",
+              tooltipText: "Wallpaper",
+              onClicked: () => GLib.spawn_command_line_async(
+                `${GLib.get_home_dir()}/.config/hypr/scripts/wallpaper.sh`
+              ),
+              child: new Widget.Label({ label: "󰸉" }),
+            }),
+            new Widget.Button({
+              className: "cc-action",
+              tooltipText: inhibited().as(i => i ? "Allow sleep" : "Block sleep"),
+              onClicked: () => {
+                if (inhibited.get()) {
+                  GLib.spawn_command_line_async("pkill -f 'systemd-inhibit --what=idle'")
+                  inhibited.set(false)
+                } else {
+                  GLib.spawn_command_line_async(
+                    "systemd-inhibit --what=idle --who=AGS --why=user sleep infinity"
+                  )
+                  inhibited.set(true)
+                }
+              },
+              child: new Widget.Label({ label: inhibited().as(i => i ? "󰒲" : "󰒳") }),
+            }),
+          ],
+        }),
+
+      ],
+    }),
   })
 }
 
-// Wallpaper Switcher Button
-function WallpaperSwitcher() {
-  return new Widget.Button({
-    className: "wallpaper-switcher",
-    tooltipText: "Change Wallpaper",
-    onClicked: () => {
-      GLib.spawn_command_line_async(`${GLib.get_home_dir()}/.config/hypr/scripts/wallpaper.sh`)
-    },
-    child: new Widget.Icon({
-      icon: "preferences-desktop-wallpaper-symbolic"
-    })
-  })
-}
-
-// Main Bar
+// ─── Bar ──────────────────────────────────────────────────────────────────────
 function Bar(gdkmonitor: Gdk.Monitor) {
   const { TOP, LEFT, RIGHT } = Astal.WindowAnchor
-
   return new Widget.Window({
     className: "Bar",
-    gdkmonitor: gdkmonitor,
+    gdkmonitor,
     exclusivity: Astal.Exclusivity.EXCLUSIVE,
     anchor: TOP | LEFT | RIGHT,
     child: new Widget.CenterBox({
       startWidget: new Widget.Box({
-        className: "left",
+        className: "bar-left",
         halign: Gtk.Align.START,
-        children: [
-          AppLauncher(),
-                                  Workspaces(),
-                                  ClientTitle()
-        ]
+        children: [AppLauncher(), Workspaces(), ClientTitle()],
       }),
       centerWidget: new Widget.Box({
-        className: "center",
-        children: [Clock()]
+        className: "bar-center",
+        halign: Gtk.Align.CENTER,
+        children: [Weather(), Clock()],
       }),
       endWidget: new Widget.Box({
-        className: "right",
+        className: "bar-right",
         halign: Gtk.Align.END,
-        children: [
-          WallpaperSwitcher(),
-                                Weather(),
-                                Media(),
-                                CPU(),
-                                RAM(),
-                                Temperature(),
-                                GPU(),
-                                ControlCenter(),
-                                NotificationButton(),
-                                IdleInhibitor(),
-                                NikoAvatar(),
-                                PowerMenu()
-        ]
-      })
-    })
+        children: [SysTray(), Media(), Temps(), WallpaperBtn(), NotifBtn(), CCBtn(), PowerBtn()],
+      }),
+    }),
   })
 }
 
-// Styling - Actually Good CSS
+// ─── CSS ──────────────────────────────────────────────────────────────────────
 const css = `
 * {
   all: unset;
-  font-family: "Terminess Nerd Font", monospace;
-  font-size: 13px;
-}
-
-window.Bar {
-  background-color: rgba(0, 0, 0, 0.9);
-  color: #9564FD;
-}
-
-box.Bar {
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), rgba(10, 10, 10, 0.9));
-  border-bottom: 3px solid ${colors.border};
-  padding: 6px 12px;
-  box-shadow: 0 2px 10px rgba(149, 100, 253, 0.3);
-}
-
-/* Workspaces */
-box.workspaces {
-  background-color: rgba(10, 10, 10, 0.6);
-  border-radius: 10px;
-  padding: 4px;
-  margin: 0 4px;
-}
-
-button.workspace {
-  min-width: 35px;
-  min-height: 35px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  color: ${colors.fgAlt};
-  border: 2px solid transparent;
-  border-radius: 8px;
-  padding: 6px 10px;
-  margin: 0 3px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  font-weight: 600;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-
-button.workspace:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 8px rgba(149, 100, 253, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.1);
-}
-
-button.workspace.focused {
-  background: linear-gradient(135deg, ${colors.fg}, ${colors.fgAlt});
-  color: #000000;
-  border-color: ${colors.accent};
-  font-weight: bold;
-  box-shadow: 0 0 20px rgba(149, 100, 253, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.2);
-}
-
-/* Client Title */
-box.client-title {
-  padding: 6px 16px;
-  background: linear-gradient(90deg, rgba(10, 10, 10, 0.8), rgba(20, 20, 20, 0.6));
-  border-radius: 10px;
-  border: 1px solid rgba(149, 100, 253, 0.2);
-  margin: 0 4px;
-}
-
-box.client-title label {
-  color: ${colors.fg};
-  font-weight: 500;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-
-/* Clock */
-box.clock {
-  padding: 6px 20px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.9), rgba(30, 30, 30, 0.8));
-  border-radius: 12px;
-  border: 2px solid ${colors.border};
-  margin: 0 8px;
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.05);
-}
-
-label.time {
-  color: ${colors.accent};
-  font-weight: bold;
-  font-size: 15px;
-  text-shadow: 0 0 10px rgba(255, 255, 51, 0.5);
-  margin-right: 10px;
-}
-
-label.date {
-  color: ${colors.fg};
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-/* Media Player */
-button.media-button {
-  padding: 6px 16px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid transparent;
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-button.media-button:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.4);
-}
-
-button.media-button icon {
-  color: ${colors.accent};
-  margin-right: 8px;
-  text-shadow: 0 0 8px rgba(255, 255, 51, 0.6);
-}
-
-button.media-button label {
-  color: ${colors.fg};
-  font-weight: 500;
-}
-
-/* Weather */
-button.weather {
-  padding: 6px 16px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid transparent;
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-button.weather:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.4);
-}
-
-button.weather label {
-  color: ${colors.fg};
-  font-weight: 600;
-  font-size: 14px;
-}
-
-/* Volume, Network, Battery */
-box.volume, box.network, box.battery {
-  padding: 6px 14px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border-radius: 10px;
-  border: 1px solid rgba(149, 100, 253, 0.2);
-  margin: 0 3px;
-}
-
-box.volume icon, box.volume label,
-box.network icon,
-box.battery icon, box.battery label {
-  color: ${colors.fg};
-}
-
-box.volume label,
-box.battery label {
-  margin-left: 6px;
-  font-weight: 500;
-}
-
-/* System Tray */
-box.system-tray {
-  background-color: rgba(10, 10, 10, 0.6);
-  border-radius: 10px;
-  padding: 4px;
-  margin: 0 4px;
-}
-
-button.tray-item {
-  padding: 8px;
-  background: rgba(20, 20, 20, 0.6);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  margin: 0 2px;
-  transition: all 200ms ease;
-}
-
-button.tray-item:hover {
-  background: rgba(149, 100, 253, 0.3);
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 2px 8px rgba(149, 100, 253, 0.4);
-}
-
-button.tray-item icon {
-  color: ${colors.fg};
-}
-
-/* Niko Avatar */
-box.niko-avatar {
-  padding: 6px 12px;
-  background: linear-gradient(135deg, rgba(30, 30, 30, 0.9), rgba(20, 20, 20, 0.8));
-  border: 2px solid ${colors.accent};
-  border-radius: 12px;
-  margin: 0 4px;
-  box-shadow: 0 0 15px rgba(255, 255, 51, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.1);
-}
-
-box.niko-avatar label {
-  font-size: 20px;
-  text-shadow: 0 0 10px rgba(255, 255, 51, 0.6);
-}
-
-/* Notification Button */
-button.notification-button {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid transparent;
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-button.notification-button:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.4);
-}
-
-button.notification-button icon {
-  color: ${colors.fg};
-  font-size: 16px;
-}
-
-/* App Launcher */
-button.app-launcher {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, ${colors.fg}, ${colors.fgAlt});
-  border: 2px solid ${colors.accent};
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 15px rgba(149, 100, 253, 0.5);
-}
-
-button.app-launcher:hover {
-  background: linear-gradient(135deg, ${colors.fgAlt}, ${colors.fg});
-  box-shadow: 0 0 25px rgba(149, 100, 253, 0.8);
-}
-
-button.app-launcher icon {
-  color: #000000;
-  font-size: 18px;
-  font-weight: bold;
-}
-
-/* Wallpaper Switcher */
-button.wallpaper-switcher {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid transparent;
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-button.wallpaper-switcher:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.4);
-}
-
-button.wallpaper-switcher icon {
-  color: ${colors.fg};
-  font-size: 16px;
-}
-
-/* System Monitor Widgets */
-box.cpu, box.ram, box.temperature, box.gpu {
-  padding: 6px 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border-radius: 10px;
-  border: 1px solid rgba(149, 100, 253, 0.2);
-  margin: 0 3px;
-}
-
-box.cpu icon, box.cpu label {
-  color: ${colors.accent};
-}
-
-box.ram icon, box.ram label {
-  color: #00FFFF;
-}
-
-box.temperature icon, box.temperature label {
-  color: #FF6B9D;
-}
-
-box.gpu icon, box.gpu label {
-  color: #00FF00;
-}
-
-box.cpu label, box.ram label, box.temperature label, box.gpu label {
-  margin-left: 6px;
-  font-weight: 600;
+  font-family: "Inconsolata Nerd Font", "Inconsolata", monospace;
   font-size: 12px;
 }
 
-/* Power Menu */
-button.power-menu {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, #FF6B9D, #FF4C7D);
-  border: 2px solid #FF0066;
+/* ── Bar window ─────────────────────────────── */
+window.Bar {
+  background-color: ${C.void};
+  color: ${C.fg};
+  border-bottom: 1px solid ${C.tealBdr};
+}
+
+window.Bar > centerbox {
+  padding: 4px 8px;
+}
+
+/* ── Pill base ──────────────────────────────── */
+.pill {
+  background-color: ${C.deep};
   border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 15px rgba(255, 107, 157, 0.5);
+  border: 1px solid ${C.border};
+  padding: 2px 10px;
+  margin: 1px 3px;
 }
 
-button.power-menu:hover {
-  background: linear-gradient(135deg, #FF4C7D, #FF6B9D);
-  box-shadow: 0 0 25px rgba(255, 107, 157, 0.8);
-}
-
-button.power-menu icon {
-  color: #000000;
-  font-size: 16px;
-}
-
-/* Idle Inhibitor */
-button.idle-inhibitor {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid transparent;
+/* ── Workspaces ─────────────────────────────── */
+box.workspaces {
+  background-color: ${C.deep};
   border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid ${C.border};
+  padding: 2px 5px;
+  margin: 1px 3px;
 }
 
-button.idle-inhibitor:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.3), rgba(123, 79, 217, 0.2));
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 4px 12px rgba(149, 100, 253, 0.4);
+button.ws {
+  min-width: 20px;
+  min-height: 20px;
+  color: ${C.dim};
+  padding: 1px 6px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 150ms ease;
 }
 
-button.idle-inhibitor icon {
-  color: ${colors.accent};
-  font-size: 16px;
+button.ws:hover {
+  background-color: rgba(199, 146, 234, 0.18);
+  color: ${C.fg};
+  border-color: ${C.dim};
 }
 
-/* Control Center Button */
-button.control-center-btn {
-  padding: 8px 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border: 2px solid rgba(149, 100, 253, 0.3);
-  border-radius: 10px;
-  margin: 0 4px;
-  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+button.ws.ws-focused {
+  background-color: ${C.teal};
+  color: ${C.void};
+  border-color: ${C.teal};
+  font-weight: bold;
 }
 
-button.control-center-btn:hover {
-  background: linear-gradient(135deg, rgba(149, 100, 253, 0.4), rgba(123, 79, 217, 0.3));
-  border-color: ${colors.fg};
-  box-shadow: 0 4px 15px rgba(149, 100, 253, 0.5);
+/* ── Client title ───────────────────────────── */
+box.client-title label {
+  color: ${C.dim};
+  font-size: 11px;
+  letter-spacing: 0.5px;
 }
 
-button.control-center-btn icon {
-  color: ${colors.fg};
-  font-size: 16px;
+/* ── App launcher ───────────────────────────── */
+button.launcher-btn {
+  border-color: rgba(199, 146, 234, 0.4);
 }
 
-/* Media Controls Dropdown */
+button.launcher-btn:hover {
+  background-color: rgba(199, 146, 234, 0.15);
+  border-color: ${C.fg};
+}
+
+button.launcher-btn label {
+  color: ${C.fg};
+  font-size: 15px;
+}
+
+/* ── Clock ──────────────────────────────────── */
+box.clock {
+  border-color: ${C.tealBdr};
+  padding: 2px 10px;
+}
+
+label.clock-bracket {
+  color: ${C.teal};
+  font-size: 13px;
+  font-weight: bold;
+}
+
+label.clock-time {
+  color: ${C.yellow};
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+label.clock-sep {
+  color: transparent;
+}
+
+label.clock-date {
+  color: ${C.dim};
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+/* ── Weather ────────────────────────────────── */
+box.weather {
+  border-color: ${C.tealBdr};
+}
+
+label.weather-label {
+  color: ${C.teal};
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Temps ──────────────────────────────────── */
+box.temps {
+  border-color: rgba(199, 146, 234, 0.18);
+}
+
+label.temp-icon {
+  color: ${C.fg};
+  font-size: 12px;
+  margin-right: 3px;
+}
+
+label.temp-icon.gpu {
+  color: ${C.teal};
+}
+
+label.temp-val {
+  color: ${C.fg};
+  font-size: 11px;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+label.temp-val.gpu {
+  color: ${C.teal};
+}
+
+label.temp-div {
+  color: ${C.border};
+  font-size: 11px;
+}
+
+/* ── Media ──────────────────────────────────── */
 box.media {
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.9), rgba(30, 30, 30, 0.8));
+  border-color: rgba(199, 146, 234, 0.18);
+}
+
+button.media-btn {
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  transition: all 130ms ease;
+}
+
+button.media-btn:hover {
+  background-color: rgba(0, 229, 200, 0.12);
+  border-color: rgba(0, 229, 200, 0.3);
+}
+
+button.media-btn label {
+  color: ${C.teal};
+  font-size: 12px;
+}
+
+button.media-play label {
+  color: ${C.fg};
+}
+
+label.media-title {
+  color: ${C.dim};
+  font-size: 11px;
+  margin-left: 6px;
+  letter-spacing: 0.3px;
+}
+
+/* ── Systray ────────────────────────────────── */
+box.systray {
+  border-color: rgba(199, 146, 234, 0.18);
+  padding: 2px 6px;
+}
+
+button.tray-btn {
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 130ms ease;
+}
+
+button.tray-btn:hover {
+  background-color: rgba(199, 146, 234, 0.15);
+  border-color: ${C.dim};
+}
+
+/* ── Icon buttons ───────────────────────────── */
+button.icon-btn {
+  border-color: rgba(199, 146, 234, 0.2);
+  transition: all 140ms ease;
+}
+
+button.icon-btn:hover {
+  background-color: rgba(199, 146, 234, 0.15);
+  border-color: ${C.fg};
+}
+
+button.icon-btn label,
+button.icon-btn icon {
+  color: ${C.fg};
+  font-size: 14px;
+}
+
+button.wallpaper-btn label {
+  color: ${C.dim};
+  font-size: 13px;
+}
+
+button.wallpaper-btn:hover label {
+  color: ${C.teal};
+}
+
+button.cc-btn icon {
+  color: ${C.fg};
+  font-size: 14px;
+}
+
+/* ── Power ──────────────────────────────────── */
+button.power-btn {
+  background-color: ${C.deep};
   border-radius: 10px;
-  padding: 4px;
-  margin: 0 4px;
+  border: 1px solid rgba(255, 79, 123, 0.35);
+  padding: 2px 12px;
+  margin: 1px 3px;
+  transition: all 140ms ease;
 }
 
-box.media-controls {
-  padding: 8px;
-  background: rgba(10, 10, 10, 0.6);
-  border-radius: 8px;
-  margin-top: 4px;
+button.power-btn:hover {
+  background-color: rgba(255, 79, 123, 0.18);
+  border-color: ${C.red};
 }
 
-button.media-control-btn {
-  padding: 8px;
-  background: rgba(20, 20, 20, 0.8);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  margin: 0 2px;
-  transition: all 200ms ease;
+button.power-btn label {
+  color: ${C.red};
+  font-size: 18px;
 }
 
-button.media-control-btn:hover {
-  background: rgba(149, 100, 253, 0.3);
-  border-color: ${colors.fgAlt};
-  box-shadow: 0 2px 8px rgba(149, 100, 253, 0.4);
-}
-
-button.media-control-btn icon {
-  color: ${colors.accent};
-}
-
-/* Tooltips */
-tooltip {
-  background: linear-gradient(135deg, rgba(0, 0, 0, 0.98), rgba(10, 10, 10, 0.95));
-  color: ${colors.fg};
-  border: 2px solid ${colors.border};
-  border-radius: 8px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 40px rgba(149, 100, 253, 0.3);
-  font-weight: 500;
-}
-
-/* Spacing between sections */
-box.left, box.center, box.right {
-  margin: 0 4px;
-}
-
-/* Control Center Popup Window */
-window.control-center-window {
+/* ── Control Center window ──────────────────── */
+window.cc-window {
   background-color: transparent;
 }
 
-box.control-center-content {
-  background: linear-gradient(135deg, rgba(0, 0, 0, 0.98), rgba(10, 10, 10, 0.95));
-  border: 2px solid ${colors.border};
-  border-radius: 16px;
-  padding: 20px;
-  margin: 10px;
-  min-width: 350px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.9), 0 0 60px rgba(149, 100, 253, 0.4);
+box.cc-box {
+  background-color: rgba(8, 0, 14, 0.97);
+  border: 1px solid rgba(199, 146, 234, 0.3);
+  border-top: 2px solid ${C.teal};
+  border-radius: 0 0 14px 14px;
+  padding: 12px;
+  margin-top: -1px;
+  min-width: 300px;
 }
 
-box.control-center-header {
-  padding-bottom: 16px;
-  border-bottom: 2px solid rgba(149, 100, 253, 0.3);
-  margin-bottom: 16px;
+box.cc-header {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 229, 200, 0.2);
 }
 
-label.control-center-title {
-  color: ${colors.fg};
-  font-size: 18px;
+label.cc-title {
+  color: ${C.teal};
+  font-size: 11px;
   font-weight: bold;
-  text-shadow: 0 0 10px rgba(149, 100, 253, 0.5);
+  letter-spacing: 2px;
 }
 
-box.control-section {
-  margin: 8px 0;
-  padding: 12px;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8), rgba(30, 30, 30, 0.6));
-  border-radius: 12px;
-  border: 1px solid rgba(149, 100, 253, 0.2);
+box.cc-section {
+  background-color: rgba(30, 0, 56, 0.6);
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 5px;
+  border: 1px solid rgba(199, 146, 234, 0.1);
 }
 
-button.control-button {
-  padding: 12px;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  transition: all 200ms ease;
+button.cc-toggle {
+  border-radius: 7px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  transition: all 130ms ease;
 }
 
-button.control-button:hover {
-  background: rgba(149, 100, 253, 0.2);
-  box-shadow: 0 2px 8px rgba(149, 100, 253, 0.3);
+button.cc-toggle:hover {
+  background-color: rgba(199, 146, 234, 0.12);
+  border-color: ${C.dim};
 }
 
-button.control-button box {
-  margin: 0 6px;
+button.cc-expand {
+  border-radius: 7px;
+  padding: 3px 8px;
+  border: 1px solid rgba(199, 146, 234, 0.2);
+  margin-left: 4px;
+  transition: all 130ms ease;
 }
 
-button.control-button icon {
-  color: ${colors.fg};
-  font-size: 24px;
+button.cc-expand:hover {
+  background-color: rgba(199, 146, 234, 0.12);
 }
 
-label.control-label {
-  color: ${colors.fg};
-  font-size: 15px;
-  font-weight: 600;
+button.cc-expand label {
+  color: ${C.dim};
+  font-size: 9px;
 }
 
-label.control-sublabel {
-  color: ${colors.fgAlt};
+label.cc-label {
+  color: ${C.fg};
   font-size: 12px;
-  opacity: 0.8;
-}
-
-label.slider-label {
-  color: ${colors.fg};
-  font-size: 14px;
   font-weight: 600;
-  margin-bottom: 8px;
+  letter-spacing: 1px;
+  margin-left: 8px;
 }
 
-slider.volume-slider, slider.brightness-slider {
-  min-height: 8px;
-  min-width: 200px;
-  background-color: rgba(149, 100, 253, 0.2);
-  border-radius: 4px;
+label.cc-sublabel {
+  color: ${C.dim};
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
 }
 
-slider.volume-slider:hover, slider.brightness-slider:hover {
-  background-color: rgba(149, 100, 253, 0.3);
+.cc-icon {
+  color: ${C.teal};
+  font-size: 15px;
 }
 
-slider.volume-slider slider, slider.brightness-slider slider {
-  background: linear-gradient(90deg, ${colors.fg}, ${colors.fgAlt});
-  border-radius: 4px;
-  min-width: 16px;
-  min-height: 16px;
-  box-shadow: 0 2px 8px rgba(149, 100, 253, 0.5);
+/* AP list */
+box.ap-list {
+  margin-top: 4px;
+  border-top: 1px solid rgba(0, 229, 200, 0.1);
+  padding-top: 4px;
 }
 
-box.control-section box {
-  margin: 0 4px;
+button.ap-row {
+  border-radius: 7px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  transition: all 130ms ease;
 }
 
-box.control-section icon {
-  color: ${colors.fg};
-  font-size: 18px;
+button.ap-row:hover {
+  background-color: rgba(199, 146, 234, 0.1);
 }
 
-box.control-section label {
-  color: ${colors.fg};
-  font-size: 13px;
-  font-weight: 500;
+button.ap-row.ap-active {
+  background-color: rgba(0, 229, 200, 0.08);
+  border-color: rgba(0, 229, 200, 0.3);
+}
+
+label.ap-sig {
+  color: ${C.teal};
+  font-size: 10px;
+  margin-right: 6px;
+  font-family: monospace;
+}
+
+label.ap-ssid {
+  color: ${C.fg};
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+button.ap-row.ap-active label.ap-ssid {
+  color: ${C.teal};
+  font-weight: 600;
+}
+
+label.ap-pct {
+  color: ${C.dim};
+  font-size: 10px;
+  margin-left: 8px;
+}
+
+/* Sliders */
+label.cc-slider-label {
+  color: ${C.fg};
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  margin-bottom: 4px;
+}
+
+slider.cc-slider {
+  min-height: 5px;
+  background-color: rgba(199, 146, 234, 0.18);
+  border-radius: 3px;
+}
+
+slider.cc-slider slider {
+  background-color: ${C.fg};
+  border-radius: 50%;
+  min-width: 13px;
+  min-height: 13px;
+}
+
+slider.cc-slider:hover {
+  background-color: rgba(199, 146, 234, 0.28);
+}
+
+label.cc-pct {
+  color: ${C.dim};
+  font-size: 10px;
+  min-width: 32px;
+  margin-left: 6px;
+}
+
+/* Actions */
+box.cc-actions {
+  margin-top: 4px;
+}
+
+button.cc-action {
+  background-color: rgba(30, 0, 56, 0.7);
+  border: 1px solid rgba(199, 146, 234, 0.2);
+  border-radius: 10px;
+  padding: 5px 16px;
+  margin: 0 3px;
+  transition: all 130ms ease;
+}
+
+button.cc-action:hover {
+  background-color: rgba(0, 229, 200, 0.12);
+  border-color: ${C.teal};
+}
+
+button.cc-action label {
+  color: ${C.fg};
+  font-size: 15px;
+}
+
+/* Tooltip */
+tooltip {
+  background-color: rgba(8, 0, 14, 0.98);
+  color: ${C.fg};
+  border: 1px solid rgba(0, 229, 200, 0.35);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
 }
 `
 
 App.start({
-  css: css,
+  css,
   main() {
     App.get_monitors().map(Bar)
-    ControlCenterPopup()
+    ControlCenter()
   },
 })
