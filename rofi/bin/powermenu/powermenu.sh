@@ -47,16 +47,8 @@ run_cmd() {
             fi
             ;;
         "$logout")
-            # For Hyprland
-            if [ "$XDG_SESSION_DESKTOP" = "Hyprland" ] || pgrep -x Hyprland &> /dev/null; then
-                hyprctl dispatch exit
-            else
-                loginctl terminate-session "$XDG_SESSION_ID"
-            fi
-            ;;
-        *)
-            exit 0
-            ;;
+         hyprctl dispatch "hl.dsp.exit()"
+         ;;
     esac
 }
 
