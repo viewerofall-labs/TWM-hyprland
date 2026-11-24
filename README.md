@@ -1,5 +1,7 @@
 # Oneshot World Machine 🌙💜
 
+## **This repo is archived, please adapt if you want to use** 
+
 A beautiful purple-themed Hyprland rice inspired by OneShot, featuring a custom AGS (Astal) bar with modern widgets and smooth animations.
 
 ### 🎨 Visual Design
